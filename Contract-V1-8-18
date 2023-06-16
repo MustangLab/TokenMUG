@@ -1,0 +1,156 @@
+/**
+ *Submitted for verification at Etherscan.io on 2023-06-12
+*/
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
+
+contract MUG {
+    string public name;
+    string public symbol;
+    uint8 public decimals;
+    uint256 public totalSupply;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+    mapping(address => bool) public isExcludedFromTax; // Addresses excluded from tax distribution
+
+    uint256 private constant MAX = ~uint256(0);
+    uint256 private constant INITIAL_SUPPLY = 100 * 10**25; // 1 Billion tokens
+    uint256 private taxPercentage; // Tax percentage to be deducted on each transfer
+    address public admin;
+    address[] public tokenHolders;
+    mapping(address => uint256) public  tokenHolderIndex;
+
+    uint256 public  totalTaxCollected;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    constructor(string memory _name, string memory _symbol, uint8 _decimals, uint256 _taxPercentage ) {
+        name = _name;
+        symbol = _symbol;
+        decimals = _decimals;
+        totalSupply = INITIAL_SUPPLY;
+        balanceOf[msg.sender] = totalSupply;
+        taxPercentage = _taxPercentage;
+        emit Transfer(address(0), msg.sender, totalSupply);
+        admin=msg.sender;
+
+        // Add initial token holder
+        tokenHolders.push(msg.sender);
+        tokenHolderIndex[msg.sender] = tokenHolders.length - 1;
+    }
+
+    function transfer(address _to, uint256 _value) external returns (bool) {
+        require(_to != address(0), "Invalid recipient");
+        require(_value > 0, "Invalid transfer amount");
+        require(balanceOf[msg.sender] >= _value, "Insufficient balance");
+
+        // Deduct tax from the transfer amount
+        uint256 taxAmount = (_value * taxPercentage) / 100;
+        uint256 transferAmount = _value - taxAmount;
+
+        // Update sender and recipient balances
+        balanceOf[msg.sender] -= _value;
+        balanceOf[_to] += transferAmount;
+
+        // Update tax collected
+        totalTaxCollected += taxAmount;
+
+        // Check if the recipient is a new token holder
+        if (balanceOf[_to] == transferAmount && tokenHolderIndex[_to] == 0) {
+            tokenHolders.push(_to);
+            tokenHolderIndex[_to] = tokenHolders.length - 1;
+        }
+
+        emit Transfer(msg.sender, _to, transferAmount);
+
+        // Transfer tax amount to contract for redistribution
+        if (taxAmount > 0) {
+            balanceOf[admin] += taxAmount / 2;
+            balanceOf[address(this)] += taxAmount / 2;
+            emit Transfer(msg.sender, address(this), taxAmount);
+        }
+
+        return true;
+    }
+
+    function redistributeTax() external {
+        require(balanceOf[address(this)] > 0, "No tax available for redistribution");
+        require(tokenHolders.length > 0, "No token holders to redistribute to");
+
+        uint256 taxAmount = balanceOf[address(this)];
+
+        // Distribute tax amount among token holders
+        for (uint256 i = 0; i < tokenHolders.length; i++) {
+            address account = tokenHolders[i];
+
+            if (!isExcludedFromTax[account]) {
+                uint256 distributionAmount = (balanceOf[account] * taxAmount) / totalSupply;
+                balanceOf[account] += distributionAmount;
+                emit Transfer(address(this), account, distributionAmount);
+            }
+        }
+
+        // Reduce tax amount from contract balance
+        balanceOf[address(this)] -= taxAmount;
+        totalTaxCollected -= taxAmount;
+    }
+
+    function excludeFromTax(address account) external {
+        require(!isExcludedFromTax[account], "Account already excluded from tax");
+
+        isExcludedFromTax[account] = true;
+    }
+
+    function includeInTax(address account) external {
+        require(isExcludedFromTax[account], "Account not excluded from tax");
+
+        isExcludedFromTax[account] = false;
+    }
+
+    function approve(address _spender, uint256 _value) external returns (bool) {
+        allowance[msg.sender][_spender] = _value;
+        emit Approval(msg.sender, _spender, _value);
+        return true;
+    }
+
+    function transferFrom(address _from, address _to, uint256 _value) external returns (bool) {
+        require(_to != address(0), "Invalid recipient");
+        require(_value > 0, "Invalid transfer amount");
+        require(balanceOf[_from] >= _value, "Insufficient balance");
+        require(allowance[_from][msg.sender] >= _value, "Insufficient allowance");
+
+        // Deduct tax from the transfer amount
+        uint256 taxAmount = (_value * taxPercentage) / 100;
+        uint256 transferAmount = _value - taxAmount;
+
+        // Update sender, recipient, and spender balances
+        balanceOf[_from] -= _value;
+        balanceOf[_to] += transferAmount;
+        allowance[_from][msg.sender] -= _value;
+
+        // Update tax collected
+        totalTaxCollected += taxAmount;
+
+        // Check if the recipient is a new token holder
+        if (balanceOf[_to] == transferAmount && tokenHolderIndex[_to] == 0) {
+            tokenHolders.push(_to);
+            tokenHolderIndex[_to] = tokenHolders.length - 1;
+        }
+
+        emit Transfer(_from, _to, transferAmount);
+
+        // Transfer tax amount to contract for redistribution
+        if (taxAmount > 0) {
+            balanceOf[admin] += taxAmount / 2;
+            balanceOf[address(this)] += taxAmount / 2;
+            emit Transfer(_from, address(this), taxAmount);
+        }
+
+        return true;
+    }
+    
+    
+}
